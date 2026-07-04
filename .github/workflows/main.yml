@@ -1,0 +1,81 @@
+name: Use Shinobu Repo
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  checkout-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Project-Heartbeat
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout external shinobu repo into modules/shinobu
+        uses: actions/checkout@v4
+        with:
+          repository: RaptorKillz12/shinobu
+          path: modules/shinobu
+          fetch-depth: 0
+
+      - name: Show tree for modules/shinobu
+        run: |
+          echo "Contents of modules/shinobu:"
+          ls -la modules/shinobu || true
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential python3 python3-pip git wget unzip ca-certificates
+
+      - name: Install scons
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install scons
+
+      - name: Apply miniaudio Android log include patch (safe, idempotent)
+        run: |
+          FILE=modules/shinobu/thirdparty/miniaudio/miniaudio.h
+          if [ -f "$FILE" ]; then
+            if ! grep -q "#include <android/log.h>" "$FILE"; then
+              echo "Patching $FILE to include <android/log.h>"
+              TMP=$(mktemp)
+              {
+                echo "#if defined(__ANDROID__)"
+                echo "#include <android/log.h>"
+                echo "#endif"
+                echo
+                cat "$FILE"
+              } > "$TMP" && mv "$TMP" "$FILE"
+            else
+              echo "$FILE already contains <android/log.h>, skipping."
+            fi
+          else
+            echo "$FILE not found — skipping patch"
+          fi
+
+      - name: Remove unsupported clang flag if present (avoid unknown-warning-option)
+        run: |
+          # Remove '-Wno-unused-but-set-variable' from SConscript or environment CCFLAGS if present.
+          FILES_TO_CHECK="SConstruct SConscript modules/shinobu/SConscript"
+          for f in $FILES_TO_CHECK; do
+            if [ -f "$f" ]; then
+              if grep -q "Wno-unused-but-set-variable" "$f"; then
+                echo "Removing '-Wno-unused-but-set-variable' from $f"
+                sed -i "s/-Wno-unused-but-set-variable//g" "$f" || true
+              fi
+            fi
+          done
+          echo "Done cleaning flags."
+
+      - name: Run scons (Android export)
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
+        run: |
+          # Adjust or set up Android SDK/NDK if required for your build runner.
+          # Run same target as in your CI logs.
+          scons platform=android target=release arch=arm64 tools=no -j$(nproc)
