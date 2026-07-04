@@ -1,0 +1,51 @@
+name: Build Shinobu Android
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git python3 python3-pip \
+            openjdk-17-jdk unzip wget
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android packages
+        run: |
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-34" \
+            "build-tools;34.0.0" \
+            "ndk;27.0.12077973"
+
+      - name: Clone Shinobu
+        run: |
+          git clone --recursive https://github.com/EIRTeam/shinobu.git
+
+      - name: Install SCons
+        run: |
+          pip install scons
+
+      - name: Build Android template
+        working-directory: shinobu
+        run: |
+          scons platform=android target=template_release
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: shinobu-android
+          path: shinobu/bin/
