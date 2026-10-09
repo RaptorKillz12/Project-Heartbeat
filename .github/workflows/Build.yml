@@ -24,34 +24,68 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y openjdk-17-jdk unzip
+          sudo apt-get install -y \
+            openjdk-17-jdk \
+            unzip \
+            ffmpeg \
+            pkg-config \
+            build-essential
           python -m pip install --upgrade pip
           pip install scons
 
+      - name: Verify FFmpeg
+        run: |
+          which ffmpeg
+          ffmpeg -version
+          pkg-config --modversion libavcodec || true
+
       - name: Clone Shinobu
         run: |
-          git clone --recursive https://github.com/EIRTeam/shinobu.git
+          git clone --recursive \
+            https://github.com/EIRTeam/shinobu.git
+
+      - name: Verify Shinobu FFmpeg configuration
+        working-directory: shinobu
+        run: |
+          test -f modules/ffmpeg/config.py
+          sed -n '1,100p' modules/ffmpeg/config.py
 
       - name: Build Shinobu editor
         working-directory: shinobu
         run: |
-          scons platform=linuxbsd target=editor -j$(nproc)
+          scons platform=linuxbsd target=editor -j2
+
+      - name: Verify editor build
+        run: |
+          find shinobu/bin -maxdepth 1 -type f -print
+          test -n "$(find shinobu/bin -maxdepth 1 \
+            -type f -name '*editor*' -print -quit)"
 
       - name: Import Project Heartbeat
         run: |
-          ./shinobu/bin/*editor* --headless --path . --quit
+          EDITOR="$(find shinobu/bin -maxdepth 1 \
+            -type f -name '*editor*' -print -quit)"
+          "$EDITOR" --headless --path . --quit
 
       - name: Export Android
         run: |
           mkdir -p build
-          ./shinobu/bin/*editor* \
+          EDITOR="$(find shinobu/bin -maxdepth 1 \
+            -type f -name '*editor*' -print -quit)"
+          "$EDITOR" \
             --headless \
             --path . \
             --export-release "Android" \
             build/ProjectHeartbeat.apk
+
+      - name: Verify APK
+        run: |
+          test -s build/ProjectHeartbeat.apk
+          ls -lh build/ProjectHeartbeat.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: ProjectHeartbeat-Android
           path: build/ProjectHeartbeat.apk
+          if-no-files-found: error
