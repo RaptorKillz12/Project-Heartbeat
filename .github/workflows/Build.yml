@@ -29,26 +29,35 @@ jobs:
             unzip \
             ffmpeg \
             pkg-config \
-            build-essential
+            build-essential \
+            libavcodec-dev \
+            libavformat-dev \
+            libavutil-dev \
+            libswscale-dev \
+            libswresample-dev
+
           python -m pip install --upgrade pip
           pip install scons
 
       - name: Verify FFmpeg
         run: |
-          which ffmpeg
+          command -v ffmpeg
           ffmpeg -version
-          pkg-config --modversion libavcodec || true
+          pkg-config --modversion libavcodec
 
       - name: Clone Shinobu
         run: |
           git clone --recursive \
             https://github.com/EIRTeam/shinobu.git
 
-      - name: Verify Shinobu FFmpeg configuration
+      - name: Debug FFmpeg configuration
         working-directory: shinobu
         run: |
-          test -f modules/ffmpeg/config.py
-          sed -n '1,100p' modules/ffmpeg/config.py
+          sed -n '1,160p' modules/ffmpeg/config.py
+          grep -R -n \
+            "ffmpeg path not found" modules/ffmpeg || true
+          command -v ffmpeg
+          ls -l /usr/bin/ffmpeg
 
       - name: Build Shinobu editor
         working-directory: shinobu
@@ -58,20 +67,34 @@ jobs:
       - name: Verify editor build
         run: |
           find shinobu/bin -maxdepth 1 -type f -print
-          test -n "$(find shinobu/bin -maxdepth 1 \
+
+          EDITOR="$(find shinobu/bin -maxdepth 1 \
             -type f -name '*editor*' -print -quit)"
+
+          if [ -z "$EDITOR" ]; then
+            echo "ERROR: Shinobu editor was not generated."
+            exit 1
+          fi
+
+          echo "Editor found: $EDITOR"
 
       - name: Import Project Heartbeat
         run: |
           EDITOR="$(find shinobu/bin -maxdepth 1 \
             -type f -name '*editor*' -print -quit)"
-          "$EDITOR" --headless --path . --quit
+
+          "$EDITOR" \
+            --headless \
+            --path . \
+            --quit
 
       - name: Export Android
         run: |
           mkdir -p build
+
           EDITOR="$(find shinobu/bin -maxdepth 1 \
             -type f -name '*editor*' -print -quit)"
+
           "$EDITOR" \
             --headless \
             --path . \
@@ -80,7 +103,11 @@ jobs:
 
       - name: Verify APK
         run: |
-          test -s build/ProjectHeartbeat.apk
+          if [ ! -s build/ProjectHeartbeat.apk ]; then
+            echo "ERROR: APK missing or empty."
+            exit 1
+          fi
+
           ls -lh build/ProjectHeartbeat.apk
 
       - name: Upload APK
