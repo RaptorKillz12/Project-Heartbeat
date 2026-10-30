@@ -8,14 +8,20 @@ permissions:
   contents: read
 
 jobs:
-  inspect-and-build:
+  prepare:
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout Project Heartbeat
+      - name: Checkout Project Heartbeat master
         uses: actions/checkout@v4
         with:
+          ref: master
           lfs: true
           submodules: recursive
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip zip curl file
 
       - name: Download Android engine
         run: |
@@ -24,53 +30,68 @@ jobs:
             -o android-engine.zip
           mkdir android-engine
           unzip -q android-engine.zip -d android-engine
-          echo "Android engine files:"
-          find android-engine -maxdepth 3 -type f | head -200
 
-      - name: Download Shinobu source
+      - name: Download Shinobu
         run: |
           git clone --recurse-submodules \
             https://github.com/EIRTeam/shinobu.git shinobu
-          echo "Shinobu files:"
-          find shinobu -maxdepth 2 \
-            \( -name SConstruct -o -name README.md \
-            -o -name build.gradle -o -name settings.gradle \
-            -o -name Android.mk \) -print
 
-      - name: Inspect Android build instructions
+      - name: Inspect game project
         run: |
-          echo "Project Gradle files:"
-          find . android-engine shinobu -type f \
-            \( -name gradlew -o -name settings.gradle \
-            -o -name settings.gradle.kts \
-            -o -name build.gradle -o -name build.gradle.kts \
-            -o -name SConstruct \) \
-            -not -path '*/.git/*' -print | head -300
+          echo "Project files:"
+          find . -maxdepth 3 -name project.godot \
+            -not -path './shinobu/*' \
+            -not -path './android-engine/*' -print
 
-      - name: Save build inspection report
+          echo "Android engine files:"
+          find android-engine -maxdepth 4 -type f | head -300
+
+          echo "Shinobu build files:"
+          find shinobu -maxdepth 4 -type f \
+            \( -name SConstruct -o -name README.md \
+            -o -name gradlew -o -name build.gradle \
+            -o -name settings.gradle \) -print | head -300
+
+          echo "Project export configuration:"
+          find . -maxdepth 4 -type f \
+            \( -name export_presets.cfg \
+            -o -name '*.gdextension' \) \
+            -not -path './shinobu/*' \
+            -not -path './android-engine/*' -print
+
+      - name: Create inspection report
         if: always()
         run: |
           {
-            echo "# Android engine inspection"
+            echo "# Project Heartbeat Android build inspection"
+            echo
+            echo "## Root files"
+            ls -la
             echo
             echo "## Android engine archive"
             unzip -l android-engine.zip | head -250
             echo
-            echo "## Build files"
-            find android-engine shinobu -type f \
-              \( -name gradlew -o -name settings.gradle \
-              -o -name settings.gradle.kts \
-              -o -name build.gradle -o -name build.gradle.kts \
-              -o -name SConstruct \) \
-              -not -path '*/.git/*' -print
-          } > build-inspection.txt
+            echo "## Game project and export files"
+            find . -maxdepth 4 -type f \
+              \( -name project.godot \
+              -o -name export_presets.cfg \
+              -o -name '*.gdextension' \) \
+              -not -path './shinobu/*' \
+              -not -path './android-engine/*' -print
+            echo
+            echo "## Engine build files"
+            find shinobu -maxdepth 4 -type f \
+              \( -name SConstruct -o -name README.md \
+              -o -name gradlew -o -name build.gradle \
+              -o -name settings.gradle \) -print
+          } > android-build-report.txt
 
-      - name: Upload inspection report
+      - name: Upload Android build report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: heartbeat-android-inspection
+          name: heartbeat-android-build-report
           path: |
-            build-inspection.txt
+            android-build-report.txt
             android-engine.zip
           retention-days: 3
