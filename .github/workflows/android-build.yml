@@ -1,0 +1,76 @@
+
+name: Project Heartbeat Android Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-and-build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout Project Heartbeat
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+          submodules: recursive
+
+      - name: Download Android engine
+        run: |
+          curl -fL --retry 3 \
+            "https://github.com/EIRTeam/Project-Heartbeat-Engine/releases/download/latest/android-engine.zip" \
+            -o android-engine.zip
+          mkdir android-engine
+          unzip -q android-engine.zip -d android-engine
+          echo "Android engine files:"
+          find android-engine -maxdepth 3 -type f | head -200
+
+      - name: Download Shinobu source
+        run: |
+          git clone --recurse-submodules \
+            https://github.com/EIRTeam/shinobu.git shinobu
+          echo "Shinobu files:"
+          find shinobu -maxdepth 2 \
+            \( -name SConstruct -o -name README.md \
+            -o -name build.gradle -o -name settings.gradle \
+            -o -name Android.mk \) -print
+
+      - name: Inspect Android build instructions
+        run: |
+          echo "Project Gradle files:"
+          find . android-engine shinobu -type f \
+            \( -name gradlew -o -name settings.gradle \
+            -o -name settings.gradle.kts \
+            -o -name build.gradle -o -name build.gradle.kts \
+            -o -name SConstruct \) \
+            -not -path '*/.git/*' -print | head -300
+
+      - name: Save build inspection report
+        if: always()
+        run: |
+          {
+            echo "# Android engine inspection"
+            echo
+            echo "## Android engine archive"
+            unzip -l android-engine.zip | head -250
+            echo
+            echo "## Build files"
+            find android-engine shinobu -type f \
+              \( -name gradlew -o -name settings.gradle \
+              -o -name settings.gradle.kts \
+              -o -name build.gradle -o -name build.gradle.kts \
+              -o -name SConstruct \) \
+              -not -path '*/.git/*' -print
+          } > build-inspection.txt
+
+      - name: Upload inspection report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: heartbeat-android-inspection
+          path: |
+            build-inspection.txt
+            android-engine.zip
+          retention-days: 3
