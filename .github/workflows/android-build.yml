@@ -8,90 +8,190 @@ permissions:
   contents: read
 
 jobs:
-  prepare:
+  inspect-android-build:
     runs-on: ubuntu-22.04
+    timeout-minutes: 45
+
     steps:
-      - name: Checkout Project Heartbeat master
+      - name: Checkout Project Heartbeat
         uses: actions/checkout@v4
         with:
           ref: master
           lfs: true
           submodules: recursive
+          fetch-depth: 0
 
-      - name: Install tools
+      - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y unzip zip curl file
+          sudo apt-get install -y \
+            unzip zip curl file git \
+            openjdk-17-jdk-headless
 
-      - name: Download Android engine
+      - name: Download Android engine package
         run: |
           curl -fL --retry 3 \
             "https://github.com/EIRTeam/Project-Heartbeat-Engine/releases/download/latest/android-engine.zip" \
             -o android-engine.zip
-          mkdir android-engine
+
+          mkdir -p android-engine
           unzip -q android-engine.zip -d android-engine
 
-      - name: Download Shinobu
+          echo "=== Android engine archive contents ==="
+          unzip -l android-engine.zip
+
+      - name: Download Shinobu source
         run: |
           git clone --recurse-submodules \
             https://github.com/EIRTeam/shinobu.git shinobu
 
-      - name: Inspect game project
+          echo "=== Shinobu revision ==="
+          git -C shinobu log -1 --format="%H %s"
+
+          echo "=== Shinobu submodules ==="
+          git -C shinobu submodule status --recursive
+
+      - name: Inspect Android engine documentation
         run: |
-          echo "Project files:"
-          find . -maxdepth 3 -name project.godot \
-            -not -path './shinobu/*' \
-            -not -path './android-engine/*' -print
+          {
+            echo "=== Android README ==="
+            cat shinobu/platform/android/README.md || true
 
-          echo "Android engine files:"
-          find android-engine -maxdepth 4 -type f | head -300
+            echo
+            echo "=== Shinobu root README ==="
+            cat shinobu/README.md || true
+          } > engine-documentation.txt
 
-          echo "Shinobu build files:"
-          find shinobu -maxdepth 4 -type f \
-            \( -name SConstruct -o -name README.md \
-            -o -name gradlew -o -name build.gradle \
-            -o -name settings.gradle \) -print | head -300
+          cat engine-documentation.txt
 
-          echo "Project export configuration:"
-          find . -maxdepth 4 -type f \
-            \( -name export_presets.cfg \
-            -o -name '*.gdextension' \) \
-            -not -path './shinobu/*' \
-            -not -path './android-engine/*' -print
+      - name: Inspect Android Gradle configuration
+        run: |
+          {
+            echo "=== Gradle and Android configuration files ==="
 
-      - name: Create inspection report
+            find shinobu/platform/android/java \
+              -maxdepth 5 -type f \
+              \( -name '*.gradle' \
+              -o -name '*.gradle.kts' \
+              -o -name 'gradle.properties' \
+              -o -name 'gradlew' \
+              -o -name 'AndroidManifest.xml' \) \
+              -print
+
+            echo
+            echo "=== Gradle wrapper version ==="
+
+            if [ -f shinobu/platform/android/java/gradlew ]; then
+              cd shinobu/platform/android/java
+              chmod +x gradlew
+              ./gradlew --version
+            fi
+          } 2>&1 | tee gradle-inspection.txt
+
+      - name: Inspect game export configuration
+        run: |
+          {
+            echo "=== Project files ==="
+            ls -la
+
+            echo
+            echo "=== Project Godot configuration ==="
+            grep -n -i -E \
+              'config/name|config/features|run/main_scene|application|android|rendering' \
+              project.godot | head -250 || true
+
+            echo
+            echo "=== Android export preset settings ==="
+            grep -n -i -E \
+              'android|custom_template|gradle|package/unique_name|version/code|version/name|architectures' \
+              export_presets.cfg | head -300 || true
+
+            echo
+            echo "=== Project export files ==="
+            find . -maxdepth 4 -type f \
+              \( -name 'project.godot' \
+              -o -name 'export_presets.cfg' \
+              -o -name '*.gdextension' \) \
+              -not -path './.git/*' \
+              -not -path './shinobu/*' \
+              -not -path './android-engine/*' -print
+
+            echo
+            echo "=== Android template archive contents ==="
+            if [ -f android-engine/android_source.zip ]; then
+              unzip -l android-engine/android_source.zip | head -250
+            else
+              echo "android_source.zip not found at expected path"
+              find android-engine -maxdepth 2 -type f -print
+            fi
+          } 2>&1 | tee project-inspection.txt
+
+      - name: Inspect Android source archive
+        run: |
+          mkdir -p android-source
+
+          if [ -f android-engine/android_source.zip ]; then
+            unzip -q android-engine/android_source.zip \
+              -d android-source
+
+            echo "=== Android source build files ==="
+
+            find android-source -maxdepth 6 -type f \
+              \( -name '*.gradle' \
+              -o -name '*.gradle.kts' \
+              -o -name 'gradlew' \
+              -o -name 'settings.gradle' \
+              -o -name 'settings.gradle.kts' \
+              -o -name 'AndroidManifest.xml' \
+              -o -name 'gradle.properties' \) \
+              -print | head -400
+          fi
+
+      - name: Create combined inspection report
         if: always()
         run: |
           {
-            echo "# Project Heartbeat Android build inspection"
+            echo "# Project Heartbeat Android Build Report"
             echo
-            echo "## Root files"
-            ls -la
+            echo "## Repository revision"
+            git rev-parse HEAD || true
+            echo
+            echo "## Shinobu revision"
+            git -C shinobu rev-parse HEAD || true
             echo
             echo "## Android engine archive"
-            unzip -l android-engine.zip | head -250
+            unzip -l android-engine.zip || true
             echo
-            echo "## Game project and export files"
-            find . -maxdepth 4 -type f \
-              \( -name project.godot \
-              -o -name export_presets.cfg \
-              -o -name '*.gdextension' \) \
-              -not -path './shinobu/*' \
-              -not -path './android-engine/*' -print
+            echo "## Engine documentation"
+            cat engine-documentation.txt || true
             echo
-            echo "## Engine build files"
-            find shinobu -maxdepth 4 -type f \
-              \( -name SConstruct -o -name README.md \
-              -o -name gradlew -o -name build.gradle \
-              -o -name settings.gradle \) -print
+            echo "## Gradle inspection"
+            cat gradle-inspection.txt || true
+            echo
+            echo "## Game export configuration"
+            cat project-inspection.txt || true
+            echo
+            echo "## Root project files"
+            find . -maxdepth 2 -type f \
+              -not -path './.git/*' \
+              -not -path './shinobu/.git/*' \
+              -not -path './android-source/*' \
+              -not -path './android-engine/*' \
+              | head -400
           } > android-build-report.txt
 
-      - name: Upload Android build report
+      - name: Upload build inspection artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: heartbeat-android-build-report
+          name: heartbeat-android-build-inspection
           path: |
             android-build-report.txt
+            engine-documentation.txt
+            gradle-inspection.txt
+            project-inspection.txt
             android-engine.zip
-          retention-days: 3
+            android-engine/android_source.zip
+            android-engine/godot-lib.template_release.aar
+          if-no-files-found: warn
+          retention-days: 7
